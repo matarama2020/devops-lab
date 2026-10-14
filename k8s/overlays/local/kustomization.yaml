@@ -1,0 +1,32 @@
+# Overlay para la fase 4: imágenes construidas en tu PC y cargadas con `kind load`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lab
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+images:
+  - name: lab-api
+    newTag: local
+  - name: lab-liquibase
+    newTag: local
+
+patches:
+  # La imagen no existe en ningún registro: no intentes descargarla
+  - target:
+      kind: Deployment
+      name: lab-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Job
+      name: liquibase-migrate
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

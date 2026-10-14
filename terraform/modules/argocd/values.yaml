@@ -1,0 +1,14 @@
+# Configuración mínima de ArgoCD para laboratorio
+configs:
+  params:
+    server.insecure: true        # sin TLS: accedemos por port-forward en local
+    timeout.reconciliation: 60s  # revisa Git cada 60 s (por defecto 180 s)
+
+dex:
+  enabled: false                 # no necesitamos SSO
+
+notifications:
+  enabled: false
+
+applicationSet:
+  replicas: 1

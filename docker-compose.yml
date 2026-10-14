@@ -1,0 +1,96 @@
+# Entorno local completo. Uso:
+#   docker compose up -d                                   -> BD + API
+#   docker compose --profile migrations run --rm liquibase-sqlserver update
+#   docker compose --profile migrations run --rm liquibase-oracle update
+name: devops-lab
+
+x-liquibase: &liquibase-base
+  build: ./liquibase
+  image: lab-liquibase:local
+  profiles: ["migrations"]
+  # Montamos los changelogs: editas en tu PC y ejecutas sin reconstruir la imagen
+  volumes:
+    - ./liquibase/changelog:/liquibase/changelog:ro
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports: ["1433:1433"]
+    volumes: [mssql-data:/var/opt/mssql]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Contenedor efímero: crea la base de datos (Liquibase necesita que exista).
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver: { condition: service_healthy }
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_DB: ${MSSQL_DB}
+    entrypoint:
+      - /bin/bash
+      - -c
+      - /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -b -Q "IF DB_ID('$$MSSQL_DB') IS NULL CREATE DATABASE [$$MSSQL_DB]"
+    restart: "no"
+
+  oracle:
+    image: gvenzl/oracle-xe:11-slim
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      APP_USER: ${ORACLE_APP_USER}            # crea el esquema LAB al primer arranque
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD}
+    shm_size: 1g                              # Oracle 11g XE exige /dev/shm >= 1 GB
+    ports: ["1521:1521"]
+    volumes: [oracle-data:/u01/app/oracle/oradata]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  api:
+    build:
+      context: ./app
+      args: { APP_VERSION: "${APP_VERSION:-local}" }
+    environment:
+      DB_HOST: sqlserver
+      DB_USER: sa
+      DB_PASSWORD: ${MSSQL_SA_PASSWORD}
+      DB_NAME: ${MSSQL_DB}
+    ports: ["8080:8080"]
+    depends_on:
+      sqlserver-init: { condition: service_completed_successfully }
+
+  liquibase-sqlserver:
+    <<: *liquibase-base
+    depends_on:
+      sqlserver-init: { condition: service_completed_successfully }
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:sqlserver://sqlserver:1433;databaseName=${MSSQL_DB};encrypt=true;trustServerCertificate=true
+      LIQUIBASE_COMMAND_USERNAME: sa
+      LIQUIBASE_COMMAND_PASSWORD: ${MSSQL_SA_PASSWORD}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/sqlserver/db.changelog-master.yaml
+
+  liquibase-oracle:
+    <<: *liquibase-base
+    depends_on:
+      oracle: { condition: service_healthy }
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:oracle:thin:@//oracle:1521/XE
+      LIQUIBASE_COMMAND_USERNAME: ${ORACLE_APP_USER}
+      LIQUIBASE_COMMAND_PASSWORD: ${ORACLE_APP_PASSWORD}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/oracle/db.changelog-master.yaml
+
+volumes:
+  mssql-data:
+  oracle-data:

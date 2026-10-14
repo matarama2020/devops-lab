@@ -1,0 +1,33 @@
+# Le dice a ArgoCD: "el estado deseado de namespace lab está en esta ruta de este repo".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lab-api
+  namespace: argocd
+  # Si borras la Application, ArgoCD borra también lo que desplegó
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/TU_USUARIO/devops-lab.git
+    targetRevision: main
+    path: k8s/overlays/dev            # ArgoCD detecta kustomization.yaml y ejecuta kustomize build
+
+  destination:
+    server: https://kubernetes.default.svc   # el mismo clúster donde corre ArgoCD
+    namespace: lab
+
+  syncPolicy:
+    automated:
+      prune: true      # borra del clúster lo que borres de Git
+      selfHeal: true   # revierte cambios manuales (kubectl edit) al estado de Git
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 3m

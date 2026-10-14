@@ -1,0 +1,54 @@
+# Job de migraciones. Para ArgoCD es un "hook" de la fase Sync:
+#  - se ejecuta en CADA sincronización, después de la wave 0 (SQL Server listo)
+#  - si falla, la sincronización falla y la API (wave 2) NO se actualiza
+#  - BeforeHookCreation: borra el Job anterior antes de crear uno nuevo
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: liquibase-migrate
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        # Paso 1: crear la base de datos si no existe (Liquibase no crea BDs)
+        - name: create-db
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mssql-secret, key: MSSQL_SA_PASSWORD }
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              for i in $(seq 1 30); do
+                /opt/mssql-tools18/bin/sqlcmd -C -S "$DB_HOST" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" -b \
+                  -Q "IF DB_ID('$DB_NAME') IS NULL CREATE DATABASE [$DB_NAME]" && exit 0
+                echo "SQL Server aún no responde, reintento $i..."; sleep 5
+              done
+              exit 1
+      containers:
+        # Paso 2: aplicar migraciones
+        - name: liquibase
+          image: lab-liquibase            # Kustomize reemplaza nombre y tag (overlay)
+          args: ["update", "--contexts=dev"]
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - name: LIQUIBASE_COMMAND_URL
+              value: "jdbc:sqlserver://$(DB_HOST):$(DB_PORT);databaseName=$(DB_NAME);encrypt=true;trustServerCertificate=true"
+            - name: LIQUIBASE_COMMAND_USERNAME
+              value: "$(DB_USER)"
+            - name: LIQUIBASE_COMMAND_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mssql-secret, key: MSSQL_SA_PASSWORD }
+            - name: LIQUIBASE_COMMAND_CHANGELOG_FILE
+              value: changelog/sqlserver/db.changelog-master.yaml

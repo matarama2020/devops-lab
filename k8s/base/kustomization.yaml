@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Etiquetas comunes añadidas a todos los recursos (útil para filtrar: kubectl get all -l project=devops-lab)
+labels:
+  - pairs:
+      project: devops-lab
+
+resources:
+  - sqlserver-secret.yaml
+  - app-config.yaml
+  - sqlserver.yaml
+  - liquibase-job.yaml
+  - api.yaml

@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-seed-customers
+      author: lab
+      context: dev
+      labels: v1
+      changes:
+        # Sin ID: lo asigna el trigger con la secuencia
+        - insert:
+            tableName: CUSTOMERS
+            columns:
+              - column: { name: DOC_NUMBER, value: "10000001" }
+              - column: { name: FULL_NAME,  value: "Ana Torres" }
+        - insert:
+            tableName: CUSTOMERS
+            columns:
+              - column: { name: DOC_NUMBER, value: "10000002" }
+              - column: { name: FULL_NAME,  value: "Luis Quispe" }
+      rollback:
+        - delete:
+            tableName: CUSTOMERS
+            where: DOC_NUMBER IN ('10000001', '10000002')

@@ -1,0 +1,10 @@
+# Configuración NO sensible compartida por la API y el Job de Liquibase
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DB_HOST: sqlserver
+  DB_PORT: "1433"
+  DB_NAME: labdb
+  DB_USER: sa

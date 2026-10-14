@@ -1,0 +1,159 @@
+# Prueba las migraciones contra motores REALES levantados como "service containers":
+# validate -> update-sql (preview) -> update -> rollback -> update (re-aplicar).
+# Si el rollback no funciona, lo descubres en el PR y no en producción.
+name: db-migrations
+
+on:
+  pull_request:
+    paths: ["liquibase/**"]
+  push:
+    branches: [main]
+    paths: ["liquibase/**", ".github/workflows/db-migrations.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Contraseñas efímeras de CI (las BD mueren al terminar el job)
+  CI_DB_PASSWORD: CiPassw0rd_123
+
+jobs:
+  sqlserver:
+    runs-on: ubuntu-latest
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: CiPassw0rd_123
+        ports: ["1433:1433"]
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P CiPassw0rd_123 -Q 'SELECT 1' -b -o /dev/null"
+          --health-interval 10s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir imagen de Liquibase
+        run: docker build -t lab-liquibase:ci liquibase
+
+      - name: Crear base de datos
+        run: >
+          docker exec ${{ job.services.sqlserver.id }}
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$CI_DB_PASSWORD" -b
+          -Q "CREATE DATABASE labdb"
+
+      - name: Preparar comando lb
+        run: |
+          cat > "$RUNNER_TEMP/lb" <<EOF
+          #!/usr/bin/env bash
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE/liquibase/changelog:/liquibase/changelog:ro" \
+            -e LIQUIBASE_COMMAND_URL="jdbc:sqlserver://localhost:1433;databaseName=labdb;encrypt=true;trustServerCertificate=true" \
+            -e LIQUIBASE_COMMAND_USERNAME=sa \
+            -e LIQUIBASE_COMMAND_PASSWORD="$CI_DB_PASSWORD" \
+            -e LIQUIBASE_COMMAND_CHANGELOG_FILE=changelog/sqlserver/db.changelog-master.yaml \
+            lab-liquibase:ci "\$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/lb"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - run: lb validate
+      - run: lb update-sql --contexts=dev > update-sqlserver.sql
+      - run: lb update --contexts=dev
+      - name: Probar rollback del último changeset
+        run: lb rollback-count --count=1
+      - name: Re-aplicar (el rollback dejó la BD consistente)
+        run: lb update --contexts=dev
+      - run: lb history
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-sqlserver
+          path: update-sqlserver.sql
+
+  oracle11g:
+    runs-on: ubuntu-latest
+    services:
+      oracle:
+        image: gvenzl/oracle-xe:11-slim
+        env:
+          ORACLE_PASSWORD: CiPassw0rd_123
+          APP_USER: LAB
+          APP_USER_PASSWORD: CiPassw0rd_123
+        ports: ["1521:1521"]
+        options: >-
+          --shm-size 1g
+          --health-cmd healthcheck.sh
+          --health-interval 15s --health-timeout 10s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir imagen de Liquibase
+        run: docker build -t lab-liquibase:ci liquibase
+
+      - name: Preparar comando lb
+        run: |
+          cat > "$RUNNER_TEMP/lb" <<EOF
+          #!/usr/bin/env bash
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE/liquibase/changelog:/liquibase/changelog:ro" \
+            -e LIQUIBASE_COMMAND_URL="jdbc:oracle:thin:@//localhost:1521/XE" \
+            -e LIQUIBASE_COMMAND_USERNAME=LAB \
+            -e LIQUIBASE_COMMAND_PASSWORD="$CI_DB_PASSWORD" \
+            -e LIQUIBASE_COMMAND_CHANGELOG_FILE=changelog/oracle/db.changelog-master.yaml \
+            lab-liquibase:ci "\$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/lb"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - run: lb validate
+      - run: lb update-sql --contexts=dev > update-oracle.sql
+      - run: lb update --contexts=dev
+      - name: Probar rollback hasta el tag v1.0
+        run: lb rollback --tag=v1.0
+      - name: Re-aplicar
+        run: lb update --contexts=dev
+      - run: lb history
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-oracle
+          path: update-oracle.sql
+
+  publish:
+    needs: [sqlserver, oracle11g]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lab-liquibase" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: liquibase
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+            ${{ steps.vars.outputs.image }}:latest
+
+  deploy-dev:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/gitops-bump.yml
+    with:
+      image: lab-liquibase
+      tag: ${{ needs.publish.outputs.tag }}

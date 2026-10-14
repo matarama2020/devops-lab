@@ -1,0 +1,53 @@
+# Workflow REUTILIZABLE (workflow_call): actualiza el tag de una imagen en el overlay dev
+# y hace commit. Ese commit es el "despliegue": ArgoCD lo detecta y sincroniza.
+# El CI nunca habla con el clúster (modelo pull de GitOps).
+name: gitops-bump
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Nombre lógico de la imagen en kustomization (lab-api | lab-liquibase)"
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+
+# Evita que dos bumps simultáneos hagan push a la vez y choquen
+concurrency:
+  group: gitops-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: imranismail/setup-kustomize@v2
+      - name: Actualizar tag en k8s/overlays/dev
+        env:
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          cd k8s/overlays/dev
+          kustomize edit set image "${IMAGE}=ghcr.io/${OWNER}/${IMAGE}:${TAG}"
+          git diff
+      - name: Commit y push
+        env:
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/dev/kustomization.yaml
+          git diff --cached --quiet && { echo "Sin cambios"; exit 0; }
+          git commit -m "deploy(dev): ${IMAGE} ${TAG}"
+          # Los push hechos con GITHUB_TOKEN no disparan otros workflows: no hay bucles
+          git pull --rebase origin main
+          git push origin HEAD:main

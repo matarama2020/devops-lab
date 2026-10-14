@@ -1,0 +1,4 @@
+# Copia a terraform.tfvars para sobreescribir valores por defecto
+cluster_name       = "lab"
+kubernetes_version = "kindest/node:v1.31.0"
+app_node_port      = 30080

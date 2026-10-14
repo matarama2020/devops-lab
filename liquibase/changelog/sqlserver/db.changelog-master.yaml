@@ -1,0 +1,16 @@
+# Changelog maestro de SQL Server.
+# Regla de oro: un changeset aplicado NUNCA se edita; los cambios van en un archivo nuevo.
+# El orden de los include es el orden de ejecución.
+databaseChangeLog:
+  - include:
+      file: changes/001-create-categories.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-create-products.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/003-seed-data.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/004-add-stock.sql
+      relativeToChangelogFile: true

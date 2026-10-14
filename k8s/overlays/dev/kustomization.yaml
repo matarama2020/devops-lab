@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lab
+
+resources:
+  - ../../base
+
+# El workflow ci-app.yml actualiza estos newTag con `kustomize edit set image`.
+# Ese commit es el que dispara el despliegue vía ArgoCD (GitOps).
+# Para la fase 4 (sin GitHub) usa newName lab-api / lab-liquibase y tag "local".
+images:
+  - name: lab-api
+    newName: ghcr.io/TU_USUARIO/lab-api
+    newTag: latest
+  - name: lab-liquibase
+    newName: ghcr.io/TU_USUARIO/lab-liquibase
+    newTag: latest
+
+patches:
+  # En dev basta 1 réplica de la API
+  - target:
+      kind: Deployment
+      name: lab-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

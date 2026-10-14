@@ -1,0 +1,26 @@
+# Changelog maestro de Oracle 11g (sistema "legado" de clientes).
+# Mezcla dos estilos a propósito para que practiques ambos:
+#   - YAML  -> cambios "abstractos" que Liquibase traduce al dialecto Oracle
+#   - SQL   -> cosas propias del motor (triggers PL/SQL) donde conviene escribir SQL nativo
+databaseChangeLog:
+  - include:
+      file: changes/001-customers.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-customers-trigger.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/003-seed-customers.yaml
+      relativeToChangelogFile: true
+
+  # Punto de restauración: permite `liquibase rollback --tag=v1.0`
+  - changeSet:
+      id: tag-v1.0
+      author: lab
+      changes:
+        - tagDatabase:
+            tag: v1.0
+
+  - include:
+      file: changes/004-customers-view.sql
+      relativeToChangelogFile: true

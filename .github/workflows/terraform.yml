@@ -1,0 +1,60 @@
+name: terraform
+
+on:
+  pull_request:
+    paths: ["terraform/**"]
+  push:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: "Crear el clúster kind + ArgoCD en el runner y destruirlo (prueba de extremo a extremo)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: terraform
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Formato
+        run: terraform fmt -check -recursive
+      - name: Init (sin backend)
+        run: terraform init -backend=false
+      - name: Validate
+        run: terraform validate
+
+  # Los runners de GitHub tienen Docker: kind funciona igual que en tu PC
+  e2e:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - run: terraform apply -auto-approve tfplan
+      - name: Verificar ArgoCD
+        run: |
+          export KUBECONFIG="$(terraform output -raw kubeconfig_path)"
+          kubectl get nodes
+          kubectl -n argocd rollout status deploy/argocd-server --timeout=180s
+          kubectl -n argocd get pods
+      - name: Destruir
+        if: always()
+        run: terraform destroy -auto-approve
