@@ -11,10 +11,10 @@ resources:
 # Para la fase 4 (sin GitHub) usa newName lab-api / lab-liquibase y tag "local".
 images:
   - name: lab-api
-    newName: ghcr.io/TU_USUARIO/lab-api
+    newName: ghcr.io/matarama2020/lab-api
     newTag: latest
   - name: lab-liquibase
-    newName: ghcr.io/TU_USUARIO/lab-liquibase
+    newName: ghcr.io/matarama2020/lab-liquibase
     newTag: latest
 
 patches:

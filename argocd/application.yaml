@@ -11,7 +11,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/TU_USUARIO/devops-lab.git
+    repoURL: https://github.com/matarama2020/devops-lab.git
     targetRevision: main
     path: k8s/overlays/dev            # ArgoCD detecta kustomization.yaml y ejecuta kustomize build
 
